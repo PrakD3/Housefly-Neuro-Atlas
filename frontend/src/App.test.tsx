@@ -1,38 +1,43 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import App from "./App";
+import { checkHealth } from "./api/client";
 
 // Mock the API client
 vi.mock("./api/client", () => ({
   checkHealth: vi.fn(),
 }));
 
-import { checkHealth } from "./api/client";
+// Mock ConnectomeViewer to avoid loading three.js in tests
+vi.mock("./components/ConnectomeViewer", () => ({
+  ConnectomeViewer: () => <div data-testid="connectome-viewer">ConnectomeViewer Mock</div>
+}));
 
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("renders the project title", async () => {
+  it("renders loading screen initially", () => {
     vi.mocked(checkHealth).mockResolvedValue({ status: "ok" });
     render(<App />);
-    expect(
-      screen.getByText("Drosophila-NeuroAtlas")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Connecting to computational backend...")).toBeInTheDocument();
   });
 
-  it("shows connected status when backend responds", async () => {
+  it("shows ConnectomeViewer when backend responds", async () => {
     vi.mocked(checkHealth).mockResolvedValue({ status: "ok" });
     render(<App />);
-    const connected = await screen.findByText("● Connected");
-    expect(connected).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByTestId("connectome-viewer")).toBeInTheDocument();
+    });
   });
 
   it("shows disconnected status when backend fails", async () => {
     vi.mocked(checkHealth).mockRejectedValue(new Error("Network error"));
     render(<App />);
-    const disconnected = await screen.findByText("○ Disconnected");
+    
+    const disconnected = await screen.findByText("System Disconnected");
     expect(disconnected).toBeInTheDocument();
   });
 });

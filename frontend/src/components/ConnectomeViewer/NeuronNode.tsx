@@ -4,30 +4,35 @@ import { Neuron } from '../../api/client';
 interface NeuronNodeProps {
   neuron: Neuron;
   isSelected: boolean;
+  isDimmed?: boolean;
   onSelect: (neuron: Neuron) => void;
   onHover: (neuron: Neuron | null) => void;
 }
 
-// Map cell types to colors
+// Map cell types to colors (restrained palette with accents)
 const cellTypeColors: Record<string, string> = {
-  "Kenyon_Cell": "#3b82f6", // blue
-  "Projection_Neuron": "#ef4444", // red
-  "Motor_Neuron": "#10b981", // green
-  "Sensory_Neuron": "#f59e0b", // yellow
-  "Interneuron": "#8b5cf6", // purple
+  "Sensory": "#fbbf24",     // yellow
+  "Interneuron": "#a78bfa", // purple
+  "Projection": "#f87171",  // red
+  "Motor": "#34d399",       // green
+  "Modulatory": "#38bdf8",  // cyan
 };
 
-export const NeuronNode: React.FC<NeuronNodeProps> = ({ neuron, isSelected, onSelect, onHover }) => {
+export const NeuronNode: React.FC<NeuronNodeProps> = ({ neuron, isSelected, isDimmed, onSelect, onHover }) => {
   const [hovered, setHovered] = useState(false);
-  const color = cellTypeColors[neuron.cell_type] || "#ffffff";
-  const scale = isSelected ? 3 : hovered ? 2 : 1;
-
-  // We scale down the synthetic coordinates slightly to fit better in standard camera view
-  // and shift by -5 so the cluster is centered at the origin
+  const color = cellTypeColors[neuron.cell_type] || "#e2e8f0";
+  
+  // Size variation based on degree could be nice, but for now we just use a subtle random/hash size
+  // Let's use the sum of x+y+z to generate a consistent subtle variation [0.8 to 1.2]
+  const sizeVariation = 0.8 + ((Math.abs(neuron.x + neuron.y + neuron.z) % 100) / 100) * 0.4;
+  
+  const scale = isSelected ? 2.5 : hovered ? 2.0 : sizeVariation;
+  
+  // Position
   const position: [number, number, number] = [
-    (neuron.x / 10) - 5,
-    (neuron.y / 10) - 5,
-    (neuron.z / 10) - 5
+    neuron.x,
+    neuron.y,
+    neuron.z
   ];
 
   return (
@@ -48,8 +53,15 @@ export const NeuronNode: React.FC<NeuronNodeProps> = ({ neuron, isSelected, onSe
         onHover(null);
       }}
     >
-      <sphereGeometry args={[0.5, 16, 16]} />
-      <meshStandardMaterial color={color} emissive={isSelected ? color : "#000000"} emissiveIntensity={isSelected ? 0.5 : 0} />
+      <sphereGeometry args={[0.5, 32, 32]} />
+      <meshStandardMaterial 
+        color={isDimmed ? "#334155" : color} 
+        emissive={isDimmed ? "#000000" : color} 
+        emissiveIntensity={isSelected ? 0.8 : hovered ? 0.5 : 0.2} 
+        transparent={true}
+        opacity={isDimmed ? 0.1 : 0.9}
+        depthWrite={!isDimmed}
+      />
     </mesh>
   );
 };

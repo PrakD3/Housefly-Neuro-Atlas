@@ -5,7 +5,7 @@ from ..models.connectome import Neuron, Connection, ConnectomeMetadata, Subgraph
 from .provider import ConnectomeProvider
 
 class SyntheticConnectomeProvider(ConnectomeProvider):
-    def __init__(self, seed: int = 42, num_neurons: int = 100, edge_probability: float = 0.05):
+    def __init__(self, seed: int = 42, num_neurons: int = 200, edge_probability: float = 0.04):
         self.seed = seed
         self.num_neurons = num_neurons
         self.edge_probability = edge_probability
@@ -15,41 +15,84 @@ class SyntheticConnectomeProvider(ConnectomeProvider):
         self._generate_graph()
 
     def _generate_graph(self):
-        """Generates a deterministic synthetic graph using a fixed random seed."""
+        """Generates a deterministic synthetic graph with a bilateral brain-like layout."""
         # Use a local random instance for determinism
         rng = random.Random(self.seed)
         
-        cell_types = ["Kenyon_Cell", "Projection_Neuron", "Motor_Neuron", "Sensory_Neuron", "Interneuron"]
-        regions = ["Mushroom_Body", "Antennal_Lobe", "Optic_Lobe", "Ventral_Nerve_Cord", "Central_Complex"]
+        cell_types = ["Sensory", "Interneuron", "Projection", "Motor", "Modulatory"]
+        
+        # Spatial regions for a bilateral shape using ellipsoids
+        # Center x, y, z and rx, ry, rz
+        spatial_regions = [
+            {"name": "Left_Lobe", "cx": -12.0, "cy": 0.0, "cz": 0.0, "rx": 7.0, "ry": 9.0, "rz": 6.0},
+            {"name": "Right_Lobe", "cx": 12.0, "cy": 0.0, "cz": 0.0, "rx": 7.0, "ry": 9.0, "rz": 6.0},
+            {"name": "Central_Bridge", "cx": 0.0, "cy": 0.0, "cz": 0.0, "rx": 5.0, "ry": 4.0, "rz": 3.0}
+        ]
         
         # Generate nodes (neurons)
         for i in range(self.num_neurons):
             neuron_id = f"syn_neuron_{i}"
             
+            # Choose a spatial region
+            s_region = rng.choice(spatial_regions)
+            
+            # Deterministic cell type assignment based on region
+            if s_region["name"] == "Central_Bridge":
+                ctype_probs = ["Interneuron", "Interneuron", "Projection", "Modulatory"]
+            else:
+                ctype_probs = ["Sensory", "Sensory", "Motor", "Projection", "Interneuron", "Modulatory"]
+                
+            cell_type = rng.choice(ctype_probs)
+            
+            # Sample point inside an ellipsoid using random numbers
+            u = rng.random()
+            v = rng.random()
+            w = rng.random()
+            theta = u * 2.0 * 3.14159
+            phi = v * 3.14159
+            r = w ** (1.0/3.0)
+            import math
+            
+            x = s_region["cx"] + s_region["rx"] * r * math.sin(phi) * math.cos(theta)
+            y = s_region["cy"] + s_region["ry"] * r * math.sin(phi) * math.sin(theta)
+            z = s_region["cz"] + s_region["rz"] * r * math.cos(phi)
+            
             neuron = Neuron(
                 neuron_id=neuron_id,
-                cell_type=rng.choice(cell_types),
-                region=rng.choice(regions),
-                x=rng.uniform(-100.0, 100.0),
-                y=rng.uniform(-100.0, 100.0),
-                z=rng.uniform(-100.0, 100.0)
+                cell_type=cell_type,
+                region=s_region["name"],
+                x=x,
+                y=y,
+                z=z
             )
             
             self.graph.add_node(neuron_id)
             self.neurons_metadata[neuron_id] = neuron
             
         # Generate edges (connections) deterministically
-        # ER graph generation manually to use our local rng
         for u in self.graph.nodes():
             for v in self.graph.nodes():
                 if u != v:
-                    if rng.random() < self.edge_probability:
+                    u_region = self.neurons_metadata[u].region
+                    v_region = self.neurons_metadata[v].region
+                    
+                    # Higher probability for intra-region, lower for inter-region
+                    if u_region == v_region:
+                        prob = self.edge_probability * 1.5
+                    elif "Central_Bridge" in (u_region, v_region):
+                        # Bridge to lobes has medium probability
+                        prob = self.edge_probability * 0.8
+                    else:
+                        # Left lobe directly to Right lobe is rare
+                        prob = self.edge_probability * 0.1
+                        
+                    if rng.random() < prob:
                         weight = rng.uniform(0.1, 5.0)
                         self.graph.add_edge(u, v, weight=weight)
                         
     def get_metadata(self) -> ConnectomeMetadata:
         return ConnectomeMetadata(
-            id=f"synthetic_er_{self.num_neurons}_{self.edge_probability}",
+            id=f"synthetic_brain_{self.num_neurons}_{self.edge_probability}",
             description="Synthetic Drosophila Connectome (Random ER Graph for Development)",
             neuron_count=self.graph.number_of_nodes(),
             connection_count=self.graph.number_of_edges(),
