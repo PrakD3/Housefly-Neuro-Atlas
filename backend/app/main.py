@@ -1,5 +1,10 @@
 """Drosophila-NeuroAtlas — FastAPI backend application."""
 
+# Load .env if present (development convenience).
+# In production, set environment variables directly.
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

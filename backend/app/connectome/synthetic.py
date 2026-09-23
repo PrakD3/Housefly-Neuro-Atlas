@@ -63,7 +63,10 @@ class SyntheticConnectomeProvider(ConnectomeProvider):
                 region=s_region["name"],
                 x=x,
                 y=y,
-                z=z
+                z=z,
+                # Synthetic neurons always have deterministically generated coordinates.
+                # has_coordinates MUST be True — the Neuron model defaults to False.
+                has_coordinates=True,
             )
             
             self.graph.add_node(neuron_id)

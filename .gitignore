@@ -57,9 +57,7 @@ frontend/dist/
 Thumbs.db
 Desktop.ini
 
-# ===========================
 # Project-specific
-# ===========================
 data/raw/
 data/processed/
 simulations/results/
@@ -68,3 +66,11 @@ simulations/results/
 *.parquet
 *.db
 *.sqlite3
+
+# ===========================
+# Credentials / Secrets
+# ===========================
+# Never commit .env — it may contain API tokens
+.env
+.env.local
+.env.production

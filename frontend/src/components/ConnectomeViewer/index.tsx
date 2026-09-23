@@ -104,34 +104,39 @@ export const ConnectomeViewer: React.FC = () => {
     });
   }, [neurons, searchQuery, cellTypeFilter, regionFilter]);
 
-  // Compute bounding box for camera framing
+  // Compute bounding box for camera framing.
+  // IMPORTANT: skip neurons that have no spatial coordinates.
+  // has_coordinates=false means x/y/z are null — never use them for layout.
   const boundingBox = useMemo(() => {
-    if (filteredNeurons.length === 0) {
+    const spatialNeurons = filteredNeurons.filter(n => n.has_coordinates);
+    if (spatialNeurons.length === 0) {
       return { center: [0, 0, 0] as [number, number, number], width: 40, height: 40, depth: 40, maxDimension: 40 };
     }
     let minX = Infinity, maxX = -Infinity;
     let minY = Infinity, maxY = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
-    
-    for (const n of filteredNeurons) {
-      if (n.x < minX) minX = n.x;
-      if (n.x > maxX) maxX = n.x;
-      if (n.y < minY) minY = n.y;
-      if (n.y > maxY) maxY = n.y;
-      if (n.z < minZ) minZ = n.z;
-      if (n.z > maxZ) maxZ = n.z;
+
+    for (const n of spatialNeurons) {
+      // Type narrowing: has_coordinates=true guarantees these are non-null
+      const x = n.x!;
+      const y = n.y!;
+      const z = n.z!;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
     }
-    
+
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const cz = (minZ + maxZ) / 2;
-    
-    const width = maxX === -Infinity ? 40 : maxX - minX;
-    const height = maxY === -Infinity ? 40 : Math.max(maxY - minY, 1);
-    const depth = maxZ === -Infinity ? 40 : maxZ - minZ;
-    
+    const width  = maxX - minX || 40;
+    const height = Math.max(maxY - minY, 1) || 40;
+    const depth  = maxZ - minZ || 40;
     const maxDimension = Math.max(width, height, depth) || 40;
-    
+
     return { center: [cx, cy, cz] as [number, number, number], width, height, depth, maxDimension };
   }, [filteredNeurons]);
 
@@ -157,14 +162,28 @@ export const ConnectomeViewer: React.FC = () => {
           <h1>Drosophila-NeuroAtlas</h1>
           <p className="subtitle">Connectome-driven computational neuroscience platform</p>
         </div>
-        {metadata?.is_synthetic && (
+        {/* Dynamic dataset badge — clearly distinguishes real from synthetic */}
+        {metadata && (
           <div style={{display: 'flex', flexDirection: 'column', alignItems: 'flex-end'}}>
-            <div className="header-status">
-              SYNTHETIC DATA
-            </div>
-            <p style={{fontSize: '0.7rem', color: '#94a3b8', margin: '4px 0 0 0', textTransform: 'uppercase', letterSpacing: '0.05em'}}>
-              Synthetic spatial layout — not anatomical coordinates
-            </p>
+            {metadata.is_synthetic ? (
+              <>
+                <div className="header-status" style={{color: '#fca5a5', border: '1px solid #7f1d1d'}}>
+                  SYNTHETIC DATA
+                </div>
+                <p style={{fontSize: '0.7rem', color: '#94a3b8', margin: '4px 0 0 0', textTransform: 'uppercase', letterSpacing: '0.05em'}}>
+                  Synthetic spatial layout — not anatomical coordinates
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="header-status" style={{color: '#86efac', border: '1px solid #14532d'}}>
+                  REAL CONNECTOME
+                </div>
+                <p style={{fontSize: '0.7rem', color: '#86efac', margin: '4px 0 0 0', textTransform: 'uppercase', letterSpacing: '0.05em'}}>
+                  {metadata.dataset_name} {metadata.dataset_version}
+                </p>
+              </>
+            )}
           </div>
         )}
       </header>
@@ -176,11 +195,25 @@ export const ConnectomeViewer: React.FC = () => {
             <h2 className="panel-title">Connectome</h2>
             <div className="data-row">
               <span className="data-label">Dataset</span>
-              <span className="data-value">Synthetic</span>
+              <span className="data-value">
+                {metadata?.is_synthetic
+                  ? 'Synthetic'
+                  : metadata?.dataset_name ?? 'Real'}
+              </span>
+            </div>
+            <div className="data-row">
+              <span className="data-label">Version</span>
+              <span className="data-value">
+                {metadata?.is_synthetic
+                  ? 'Dev / Test'
+                  : metadata?.dataset_version ?? '—'}
+              </span>
             </div>
             <div className="data-row">
               <span className="data-label">Status</span>
-              <span className="data-value" style={{color: '#fca5a5'}}>Software Test Data</span>
+              <span className="data-value" style={{color: metadata?.is_synthetic ? '#fca5a5' : '#86efac'}}>
+                {metadata?.is_synthetic ? 'Software Test Data' : 'Real Connectome Data'}
+              </span>
             </div>
           </div>
 
@@ -292,6 +325,24 @@ export const ConnectomeViewer: React.FC = () => {
                   <span className="data-label">Region</span>
                   <span className="data-value">{selectedNeuron.region}</span>
                 </div>
+                {selectedNeuron.instance && (
+                  <div className="data-row">
+                    <span className="data-label">Instance</span>
+                    <span className="data-value">{selectedNeuron.instance}</span>
+                  </div>
+                )}
+                {selectedNeuron.neurotransmitter && (
+                  <div className="data-row">
+                    <span className="data-label">Neurotransmitter</span>
+                    <span className="data-value" style={{color: '#a3e635'}}>{selectedNeuron.neurotransmitter}</span>
+                  </div>
+                )}
+                <div className="data-row">
+                  <span className="data-label">Spatial</span>
+                  <span className="data-value" style={{color: selectedNeuron.has_coordinates ? '#86efac' : '#94a3b8'}}>
+                    {selectedNeuron.has_coordinates ? '3D position available' : 'No spatial data'}
+                  </span>
+                </div>
                 <div className="data-row">
                   <span className="data-label">Degree</span>
                   <span className="data-value">{neighborsData ? neighborsData.connections.length : '-'}</span>
@@ -328,11 +379,11 @@ export const ConnectomeViewer: React.FC = () => {
       <footer className="bottom-bar">
         <div className="bottom-stat">
           <span>NEURONS:</span>
-          <span className="bottom-stat-val">{metadata?.neuron_count || 0}</span>
+          <span className="bottom-stat-val">{metadata?.neuron_count !== undefined && metadata.neuron_count >= 0 ? metadata.neuron_count : neurons.length}</span>
         </div>
         <div className="bottom-stat">
           <span>CONNECTIONS:</span>
-          <span className="bottom-stat-val">{metadata?.connection_count || 0}</span>
+          <span className="bottom-stat-val">{metadata?.connection_count !== undefined && metadata.connection_count >= 0 ? metadata.connection_count : 0}</span>
         </div>
         <div className="bottom-stat">
           <span>SELECTED:</span>
@@ -344,7 +395,9 @@ export const ConnectomeViewer: React.FC = () => {
         </div>
         <div className="bottom-stat" style={{marginLeft: 'auto'}}>
           <span>DATASET:</span>
-          <span className="bottom-stat-val" style={{color: '#fca5a5'}}>SYNTHETIC</span>
+          <span className="bottom-stat-val" style={{color: metadata?.is_synthetic ? '#fca5a5' : '#86efac'}}>
+            {metadata?.is_synthetic ? 'SYNTHETIC' : (metadata?.dataset_version ?? 'REAL')}
+          </span>
         </div>
       </footer>
     </>

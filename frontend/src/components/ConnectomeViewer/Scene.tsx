@@ -86,12 +86,20 @@ export const Scene: React.FC<SceneProps> = ({
     }
   }, [center, width, height, depth, selectedNeuron]);
 
-  // Smooth camera targeting on selection
+  // Smooth camera targeting on selection.
+  // Only move toward the neuron if it actually has spatial coordinates.
   useFrame(() => {
-    if (selectedNeuron && controlsRef.current) {
+    if (
+      selectedNeuron &&
+      selectedNeuron.has_coordinates &&
+      selectedNeuron.x !== null &&
+      selectedNeuron.y !== null &&
+      selectedNeuron.z !== null &&
+      controlsRef.current
+    ) {
       const targetPos = new THREE.Vector3(
-        selectedNeuron.x, 
-        selectedNeuron.y, 
+        selectedNeuron.x,
+        selectedNeuron.y,
         selectedNeuron.z
       );
       controlsRef.current.target.lerp(targetPos, 0.05);

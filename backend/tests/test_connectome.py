@@ -56,7 +56,9 @@ def test_api_connectome_info():
     assert data["neuron_count"] == 100
 
 def test_api_connectome_neurons():
-    response = client.get("/connectome/neurons")
+    # Use limit=500 to retrieve all 100 synthetic neurons
+    # (the API default is limit=50, which is correct for large real datasets)
+    response = client.get("/connectome/neurons?limit=500")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 100
