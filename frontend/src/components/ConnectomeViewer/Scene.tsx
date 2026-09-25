@@ -20,6 +20,12 @@ interface SceneProps {
   height: number;
   depth: number;
   transform?: VisualizationTransform | null;
+  simulationActivity?: Record<string, number> | null;
+  simulationDeltas?: Record<string, number> | null;
+  simulationMode?: 'none' | 'perturbed' | 'baseline' | 'delta';
+  targetNeuronIds?: Set<string>;
+  affectedNeuronIds?: Set<string>;
+  highlightAffectedOnly?: boolean;
 }
 
 export const Scene: React.FC<SceneProps> = ({ 
@@ -35,6 +41,12 @@ export const Scene: React.FC<SceneProps> = ({
   height,
   depth,
   transform,
+  simulationActivity,
+  simulationDeltas,
+  simulationMode = 'none',
+  targetNeuronIds,
+  affectedNeuronIds,
+  highlightAffectedOnly = false,
 }) => {
   const controlsRef = useRef<any>(null);
 
@@ -121,7 +133,11 @@ export const Scene: React.FC<SceneProps> = ({
       {/* Neurons */}
       {neurons.map(neuron => {
         const isSelected = selectedNeuron?.neuron_id === neuron.neuron_id || highlightedNeuronIds.has(neuron.neuron_id);
-        const isDimmed = selectedNeuron !== null && !isSelected;
+        const isTarget = targetNeuronIds?.has(neuron.neuron_id) || false;
+        const isAffected = affectedNeuronIds?.has(neuron.neuron_id) || false;
+        const isDimmed = (selectedNeuron !== null && !isSelected) || (highlightAffectedOnly && !isAffected && !isTarget);
+        const simAct = simulationActivity ? simulationActivity[neuron.neuron_id] : null;
+        const simDelta = simulationDeltas ? simulationDeltas[neuron.neuron_id] : null;
         
         return (
           <NeuronNode
@@ -132,6 +148,11 @@ export const Scene: React.FC<SceneProps> = ({
             scenePosition={scenePositions.get(neuron.neuron_id)}
             onSelect={onSelectNeuron}
             onHover={onHoverNeuron}
+            simActivity={simAct}
+            simDelta={simDelta}
+            simMode={simulationMode}
+            isTarget={isTarget}
+            isModelAffected={isAffected}
           />
         );
       })}

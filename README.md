@@ -61,10 +61,16 @@ Chemical / Formulation
 | 2     | 3D Synthetic Connectome Visualization | ✅ Complete |
 | 3     | Real Drosophila Connectome Provider | ✅ Complete |
 | 4     | Real Connectome Visualization      | ✅ Complete |
-| 5+    | Neural Perturbation, Analysis, Chemistry… | Planned |
+| 5     | Neural Perturbation Engine         | ✅ Complete |
+| 6     | Network Analysis Engine            | ✅ Complete |
+| 7+    | Chemistry, Target Mapping…         | Planned |
 
-**Phase 4 — Real Connectome Visualization** enables interactive 3D exploration
-of bounded subgraphs from the HHMI Janelia MaleCNS v1.0 connectome.
+**Phase 6 — Network Analysis Engine** provides graph-theoretic and analytical quantification of
+connectome subgraphs and Phase 5 simulation dynamics: structural metrics (density, degrees, components, path lengths),
+topological centralities (betweenness, degree, closeness), target reachability layers, model-affected neuron classification,
+and interactive 3D highlight integration.
+See [Network Analysis Specification](docs/network_analysis.md), [Simulation Specification](docs/simulation.md), and [Scientific Model](docs/scientific_model.md).
+
 
 ---
 

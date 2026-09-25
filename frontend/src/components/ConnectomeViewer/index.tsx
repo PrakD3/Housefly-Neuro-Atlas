@@ -8,11 +8,15 @@ import {
   Neuron, 
   Connection, 
   ConnectomeMetadata, 
-  SubgraphResponse 
+  SubgraphResponse,
+  SimulationResult,
+  NetworkAnalysisResult,
 } from '../../api/client';
 import { Scene } from './Scene';
 import { RealModePanel } from './RealModePanel';
 import { ErrorPanel } from './ErrorPanel';
+import { SimulationPanel } from './SimulationPanel';
+import { NetworkAnalysisPanel } from './NetworkAnalysisPanel';
 import { computeTransform, DEFAULT_SCENE_DIAMETER } from './VisualizationTransform';
 
 export const ConnectomeViewer: React.FC = () => {
@@ -30,6 +34,16 @@ export const ConnectomeViewer: React.FC = () => {
   const [showConnections, setShowConnections] = useState<boolean>(true);
   const [wasTruncated, setWasTruncated] = useState<boolean>(false);
   const [activeFocalId, setActiveFocalId] = useState<string | null>(null);
+
+  // Phase 5 & 6: Simulation and Analysis state
+  const [activeRightTab, setActiveRightTab] = useState<'inspector' | 'simulation' | 'analysis'>('inspector');
+  const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
+  const [simulationMode, setSimulationMode] = useState<'none' | 'perturbed' | 'baseline' | 'delta'>('none');
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [networkAnalysis, setNetworkAnalysis] = useState<NetworkAnalysisResult | null>(null);
+  const [highlightAffectedOnly, setHighlightAffectedOnly] = useState<boolean>(false);
+  const [activeHopFilter, setActiveHopFilter] = useState<number | 'all'>('all');
 
   // Filters (used in synthetic mode)
   const [searchQuery, setSearchQuery] = useState("");
@@ -141,6 +155,56 @@ export const ConnectomeViewer: React.FC = () => {
     setRegionFilter("All");
     setCanvasKey(prev => prev + 1);
   }, []);
+
+  // Timeline animation playback
+  useEffect(() => {
+    if (!isPlaying || !simulationResult) return;
+    const interval = setInterval(() => {
+      setCurrentStepIndex(prev => {
+        if (prev >= simulationResult.time_series.length - 1) {
+          setIsPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 150);
+    return () => clearInterval(interval);
+  }, [isPlaying, simulationResult]);
+
+  const currentSimActivity = useMemo(() => {
+    if (!simulationResult || simulationMode === 'none') return null;
+    if (simulationMode === 'baseline') {
+      return simulationResult.baseline_time_series[currentStepIndex]?.neuron_activity ?? null;
+    }
+    return simulationResult.time_series[currentStepIndex]?.neuron_activity ?? null;
+  }, [simulationResult, simulationMode, currentStepIndex]);
+
+  const currentSimDeltas = useMemo(() => {
+    if (!simulationResult || simulationMode !== 'delta') return null;
+    const map: Record<string, number> = {};
+    for (const d of simulationResult.neuron_deltas) {
+      map[d.neuron_id] = d.delta_activity;
+    }
+    return map;
+  }, [simulationResult, simulationMode]);
+
+  const targetNeuronIds = useMemo(() => {
+    if (!simulationResult) return new Set<string>();
+    const set = new Set<string>();
+    for (const p of simulationResult.provenance.perturbations) {
+      for (const t of p.target_neuron_ids) set.add(t);
+    }
+    return set;
+  }, [simulationResult]);
+
+  const affectedNeuronIds = useMemo(() => {
+    if (!networkAnalysis) return new Set<string>();
+    return new Set(
+      networkAnalysis.perturbation_analysis.affected_neurons
+        .filter(n => n.exceeds_threshold)
+        .map(n => n.neuron_id)
+    );
+  }, [networkAnalysis]);
 
   const displayNeuron = hoveredNeuron || selectedNeuron;
   const isRealMode = metadata?.is_synthetic === false;
@@ -429,6 +493,12 @@ export const ConnectomeViewer: React.FC = () => {
               height={boundingBox.height}
               depth={boundingBox.depth}
               transform={transform}
+              simulationActivity={currentSimActivity}
+              simulationDeltas={currentSimDeltas}
+              simulationMode={simulationMode}
+              targetNeuronIds={targetNeuronIds}
+              affectedNeuronIds={affectedNeuronIds}
+              highlightAffectedOnly={highlightAffectedOnly}
             />
           </Canvas>
           
@@ -452,89 +522,200 @@ export const ConnectomeViewer: React.FC = () => {
 
         {/* RIGHT PANEL */}
         <aside className="panel right-panel">
-          <h2 className="panel-title">Inspector</h2>
-          
-          {!selectedNeuron ? (
-            <div style={{ color: '#94a3b8', textAlign: 'center', marginTop: '2rem', fontSize: '0.9rem' }}>
-              SELECT A NEURON
-            </div>
+          {/* Tab Header: Inspector vs Simulation vs Analysis */}
+          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.5rem', borderBottom: '1px solid #334155', paddingBottom: '0.5rem' }}>
+            <button
+              className="btn"
+              style={{
+                flex: 1,
+                background: activeRightTab === 'inspector' ? '#1e293b' : 'transparent',
+                borderColor: activeRightTab === 'inspector' ? '#38bdf8' : 'transparent',
+                color: activeRightTab === 'inspector' ? '#38bdf8' : '#94a3b8',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: '0.35rem 0.3rem',
+              }}
+              onClick={() => setActiveRightTab('inspector')}
+            >
+              Inspector
+            </button>
+            <button
+              className="btn"
+              style={{
+                flex: 1,
+                background: activeRightTab === 'simulation' ? '#1e293b' : 'transparent',
+                borderColor: activeRightTab === 'simulation' ? '#38bdf8' : 'transparent',
+                color: activeRightTab === 'simulation' ? '#38bdf8' : '#94a3b8',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: '0.35rem 0.3rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.3rem',
+              }}
+              onClick={() => setActiveRightTab('simulation')}
+            >
+              <span>Simulation</span>
+              {simulationResult && (
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#38bdf8' }}></span>
+              )}
+            </button>
+            <button
+              className="btn"
+              style={{
+                flex: 1,
+                background: activeRightTab === 'analysis' ? '#1e293b' : 'transparent',
+                borderColor: activeRightTab === 'analysis' ? '#38bdf8' : 'transparent',
+                color: activeRightTab === 'analysis' ? '#38bdf8' : '#94a3b8',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: '0.35rem 0.3rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.3rem',
+              }}
+              onClick={() => setActiveRightTab('analysis')}
+            >
+              <span>Analysis</span>
+              {networkAnalysis && (
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#38bdf8' }}></span>
+              )}
+            </button>
+          </div>
+
+          {activeRightTab === 'analysis' ? (
+            <NetworkAnalysisPanel
+              neurons={filteredNeurons}
+              selectedNeuron={selectedNeuron}
+              simulationResult={simulationResult}
+              onSelectNeuron={handleSelectNeuron}
+              analysisResult={networkAnalysis}
+              onAnalysisResult={setNetworkAnalysis}
+              onGoToSimulation={() => setActiveRightTab('simulation')}
+              highlightAffectedOnly={highlightAffectedOnly}
+              onToggleHighlightAffected={() => setHighlightAffectedOnly(prev => !prev)}
+              activeHopFilter={activeHopFilter}
+              onSelectHopFilter={setActiveHopFilter}
+            />
+          ) : activeRightTab === 'simulation' ? (
+            <SimulationPanel
+              neurons={filteredNeurons}
+              selectedNeuron={selectedNeuron}
+              activeFocalId={activeFocalId}
+              isRealMode={isRealMode}
+              onSelectNeuron={handleSelectNeuron}
+              onSimulationResult={res => {
+                setSimulationResult(res);
+                if (res) {
+                  // Reset previous analysis when new simulation runs
+                  setNetworkAnalysis(null);
+                }
+              }}
+              onSimulationModeChange={setSimulationMode}
+              onTimeStepChange={setCurrentStepIndex}
+              simulationResult={simulationResult}
+              currentStepIndex={currentStepIndex}
+              simMode={simulationMode}
+              isPlaying={isPlaying}
+              onTogglePlay={() => setIsPlaying(prev => !prev)}
+            />
           ) : (
             <>
-              <div className="panel-section">
-                <h3>Neuron Properties</h3>
-                <div className="data-row">
-                  <span className="data-label">ID</span>
-                  <span className="data-value" style={{color: '#38bdf8'}}>{selectedNeuron.neuron_id}</span>
+              <h2 className="panel-title">Inspector</h2>
+              
+              {!selectedNeuron ? (
+                <div style={{ color: '#94a3b8', textAlign: 'center', marginTop: '2rem', fontSize: '0.9rem' }}>
+                  SELECT A NEURON
                 </div>
-                <div className="data-row">
-                  <span className="data-label">Type</span>
-                  <span className="data-value">{selectedNeuron.cell_type}</span>
-                </div>
-                <div className="data-row">
-                  <span className="data-label">Region</span>
-                  <span className="data-value">{selectedNeuron.region}</span>
-                </div>
-                {selectedNeuron.instance && (
-                  <div className="data-row">
-                    <span className="data-label">Instance</span>
-                    <span className="data-value">{selectedNeuron.instance}</span>
-                  </div>
-                )}
-                {selectedNeuron.status && (
-                  <div className="data-row">
-                    <span className="data-label">Status</span>
-                    <span className="data-value">{selectedNeuron.status}</span>
-                  </div>
-                )}
-                {selectedNeuron.neurotransmitter && (
-                  <div className="data-row">
-                    <span className="data-label">Neurotransmitter</span>
-                    <span className="data-value" style={{color: '#a3e635'}}>{selectedNeuron.neurotransmitter}</span>
-                  </div>
-                )}
-                <div className="data-row">
-                  <span className="data-label">Spatial</span>
-                  <span className="data-value" style={{color: selectedNeuron.has_coordinates ? '#86efac' : '#94a3b8'}}>
-                    {selectedNeuron.has_coordinates ? '3D position available' : 'No spatial data'}
-                  </span>
-                </div>
-                <div className="data-row">
-                  <span className="data-label">Degree</span>
-                  <span className="data-value">{neighborsData ? neighborsData.connections.length : '-'}</span>
-                </div>
-
-                {isRealMode && selectedNeuron.neuron_id !== activeFocalId && (
-                  <button
-                    className="btn btn-primary"
-                    style={{ marginTop: '0.75rem', width: '100%', fontSize: '0.8rem' }}
-                    onClick={() => handleLoadNeighborhood(selectedNeuron.neuron_id, 1)}
-                  >
-                    Focus Subgraph on this Neuron
-                  </button>
-                )}
-              </div>
-
-              {neighborsData && neighborsData.neurons.length > 1 && (
-                <div className="panel-section">
-                  <h3>Connected Neurons</h3>
-                  <div className="neighbor-list">
-                    {neighborsData.neurons.filter(n => n.neuron_id !== selectedNeuron.neuron_id).slice(0, 10).map(n => (
-                      <div 
-                        key={n.neuron_id} 
-                        className="neighbor-item"
-                        onClick={() => handleSelectNeuron(n)}
-                      >
-                        <span>{n.neuron_id}</span>
-                        <span style={{color: '#94a3b8'}}>{n.cell_type}</span>
-                      </div>
-                    ))}
-                    {neighborsData.neurons.length > 11 && (
-                      <div className="neighbor-item" style={{justifyContent: 'center', cursor: 'default', background: 'transparent', border: 'none'}}>
-                        <span style={{color: '#94a3b8'}}>...and {neighborsData.neurons.length - 11} more</span>
+              ) : (
+                <>
+                  <div className="panel-section">
+                    <h3>Neuron Properties</h3>
+                    <div className="data-row">
+                      <span className="data-label">ID</span>
+                      <span className="data-value" style={{color: '#38bdf8'}}>{selectedNeuron.neuron_id}</span>
+                    </div>
+                    <div className="data-row">
+                      <span className="data-label">Type</span>
+                      <span className="data-value">{selectedNeuron.cell_type}</span>
+                    </div>
+                    <div className="data-row">
+                      <span className="data-label">Region</span>
+                      <span className="data-value">{selectedNeuron.region}</span>
+                    </div>
+                    {selectedNeuron.instance && (
+                      <div className="data-row">
+                        <span className="data-label">Instance</span>
+                        <span className="data-value">{selectedNeuron.instance}</span>
                       </div>
                     )}
+                    {selectedNeuron.status && (
+                      <div className="data-row">
+                        <span className="data-label">Status</span>
+                        <span className="data-value">{selectedNeuron.status}</span>
+                      </div>
+                    )}
+                    {selectedNeuron.neurotransmitter && (
+                      <div className="data-row">
+                        <span className="data-label">Neurotransmitter</span>
+                        <span className="data-value" style={{color: '#a3e635'}}>{selectedNeuron.neurotransmitter}</span>
+                      </div>
+                    )}
+                    <div className="data-row">
+                      <span className="data-label">Spatial</span>
+                      <span className="data-value" style={{color: selectedNeuron.has_coordinates ? '#86efac' : '#94a3b8'}}>
+                        {selectedNeuron.has_coordinates ? '3D position available' : 'No spatial data'}
+                      </span>
+                    </div>
+                    <div className="data-row">
+                      <span className="data-label">Degree</span>
+                      <span className="data-value">{neighborsData ? neighborsData.connections.length : '-'}</span>
+                    </div>
+
+                    <button
+                      className="btn"
+                      style={{ marginTop: '0.5rem', width: '100%', fontSize: '0.8rem', borderColor: '#38bdf8', color: '#38bdf8' }}
+                      onClick={() => setActiveRightTab('simulation')}
+                    >
+                      Use as Simulation Target
+                    </button>
+
+                    {isRealMode && selectedNeuron.neuron_id !== activeFocalId && (
+                      <button
+                        className="btn btn-primary"
+                        style={{ marginTop: '0.5rem', width: '100%', fontSize: '0.8rem' }}
+                        onClick={() => handleLoadNeighborhood(selectedNeuron.neuron_id, 1)}
+                      >
+                        Focus Subgraph on this Neuron
+                      </button>
+                    )}
                   </div>
-                </div>
+
+                  {neighborsData && neighborsData.neurons.length > 1 && (
+                    <div className="panel-section">
+                      <h3>Connected Neurons</h3>
+                      <div className="neighbor-list">
+                        {neighborsData.neurons.filter(n => n.neuron_id !== selectedNeuron.neuron_id).slice(0, 10).map(n => (
+                          <div 
+                            key={n.neuron_id} 
+                            className="neighbor-item"
+                            onClick={() => handleSelectNeuron(n)}
+                          >
+                            <span>{n.neuron_id}</span>
+                            <span style={{color: '#94a3b8'}}>{n.cell_type}</span>
+                          </div>
+                        ))}
+                        {neighborsData.neurons.length > 11 && (
+                          <div className="neighbor-item" style={{justifyContent: 'center', cursor: 'default', background: 'transparent', border: 'none'}}>
+                            <span style={{color: '#94a3b8'}}>...and {neighborsData.neurons.length - 11} more</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}

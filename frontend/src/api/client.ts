@@ -198,3 +198,293 @@ export async function searchNeurons(
   return response.json();
 }
 
+// =====================================================================
+// Phase 5: Computational Neural Perturbation Simulation Types & APIs
+// =====================================================================
+
+export type PerturbationEffect =
+  | "activation"
+  | "excitation"
+  | "inhibition"
+  | "suppression"
+  | "edge_weight_modification";
+
+export interface NeuralPerturbation {
+  target_neuron_ids: string[];
+  effect: PerturbationEffect;
+  magnitude: number;
+  start_time?: number;
+  duration: number;
+  mechanism?: string;
+  source?: string;
+  evidence?: string;
+  confidence?: string;
+}
+
+export interface SimulationConfig {
+  dt?: number;
+  duration?: number;
+  decay?: number;
+  propagation_strength?: number;
+  baseline_activity?: number;
+  min_activity?: number;
+  max_activity?: number;
+}
+
+export interface SimulationState {
+  time: number;
+  neuron_activity: Record<string, number>;
+  active_perturbations?: NeuralPerturbation[];
+}
+
+export interface NetworkMetrics {
+  mean_activity: number;
+  active_neuron_count: number;
+  maximum_activity: number;
+  minimum_activity: number;
+  total_network_activity: number;
+  perturbed_neuron_activity: Record<string, number>;
+  downstream_affected_neuron_count: number;
+}
+
+export interface PropagationHopRecord {
+  neuron_id: string;
+  hop_distance?: number | null;
+  activity_change: number;
+  time_of_change?: number | null;
+}
+
+export interface SimulationProvenance {
+  simulation_id: string;
+  connectome_provider: string;
+  dataset_name?: string | null;
+  dataset_version?: string | null;
+  is_synthetic: boolean;
+  creation_timestamp: string;
+  model_version: string;
+  neuron_count: number;
+  connection_count: number;
+  config: SimulationConfig;
+  perturbations: NeuralPerturbation[];
+}
+
+export interface NeuronDelta {
+  neuron_id: string;
+  cell_type: string;
+  region: string;
+  baseline_activity: number;
+  perturbed_activity: number;
+  delta_activity: number;
+  hop_distance?: number | null;
+  has_coordinates: boolean;
+  x?: number | null;
+  y?: number | null;
+  z?: number | null;
+}
+
+export interface SimulationResult {
+  simulation_id: string;
+  config: SimulationConfig;
+  time_series: SimulationState[];
+  baseline_time_series: SimulationState[];
+  final_state: SimulationState;
+  baseline_final_state: SimulationState;
+  metrics: NetworkMetrics;
+  baseline_metrics: NetworkMetrics;
+  neuron_deltas: NeuronDelta[];
+  propagation_records: PropagationHopRecord[];
+  provenance: SimulationProvenance;
+  was_truncated: boolean;
+}
+
+export interface SimulationRunRequest {
+  neuron_ids?: string[];
+  focal_neuron_id?: string;
+  hops?: number;
+  perturbations: NeuralPerturbation[];
+  config?: SimulationConfig;
+}
+
+/**
+ * Execute a computational neural perturbation simulation on a bounded subgraph.
+ */
+export async function runSimulation(
+  request: SimulationRunRequest
+): Promise<SimulationResult> {
+  const response = await fetch(`${API_BASE_URL}/simulations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.detail || `Simulation failed: ${response.status}`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+/**
+ * Retrieve the results of a previously executed simulation run.
+ */
+export async function getSimulation(
+  simulationId: string
+): Promise<SimulationResult> {
+  const response = await fetch(`${API_BASE_URL}/simulations/${simulationId}`);
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.detail || `Failed to fetch simulation: ${response.status}`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+// =====================================================================
+// Phase 6: Network Analysis Types & APIs
+// =====================================================================
+
+export interface GraphStructuralMetrics {
+  neuron_count: number;
+  connection_count: number;
+  density: number;
+  mean_in_degree: number;
+  mean_out_degree: number;
+  max_in_degree: number;
+  max_out_degree: number;
+  strongly_connected_components: number;
+  weakly_connected_components: number;
+  largest_wcc_size: number;
+  average_shortest_path_length?: number | null;
+  is_directed: boolean;
+  is_dag: boolean;
+}
+
+export interface CentralityMetricValue {
+  neuron_id: string;
+  in_degree_centrality: number;
+  out_degree_centrality: number;
+  betweenness_centrality: number;
+  closeness_centrality: number;
+}
+
+export interface TargetAnalysis {
+  target_neuron_id: string;
+  in_degree: number;
+  out_degree: number;
+  total_degree: number;
+  upstream_neuron_count: number;
+  downstream_neuron_count: number;
+  upstream_neurons: string[];
+  downstream_neurons: string[];
+  reachability_by_hop: Record<number, string[]>;
+  reachability_counts: Record<number, number>;
+  shortest_path_lengths_downstream: Record<string, number>;
+}
+
+export interface ModelAffectedNeuron {
+  neuron_id: string;
+  cell_type: string;
+  region: string;
+  baseline_activity: number;
+  perturbed_activity: number;
+  delta_activity: number;
+  absolute_delta: number;
+  hop_distance?: number | null;
+  is_target: boolean;
+  exceeds_threshold: boolean;
+  has_coordinates: boolean;
+  x?: number | null;
+  y?: number | null;
+  z?: number | null;
+}
+
+export interface TemporalNeuronMetrics {
+  neuron_id: string;
+  initial_activity: number;
+  final_activity: number;
+  max_activity: number;
+  min_activity: number;
+  peak_absolute_change: number;
+  time_of_peak_change: number;
+  area_under_curve: number;
+  time_to_threshold?: number | null;
+}
+
+export interface PerturbationSummaryMetrics {
+  threshold: number;
+  total_baseline_activity: number;
+  total_perturbed_activity: number;
+  delta_total_activity: number;
+  mean_baseline_activity: number;
+  mean_perturbed_activity: number;
+  mean_absolute_activity_change: number;
+  max_absolute_activity_change: number;
+  model_affected_neuron_count: number;
+  model_affected_neuron_fraction: number;
+  target_activity_summary: Record<string, Record<string, number>>;
+}
+
+export interface PerturbationAnalysis {
+  target_neuron_ids: string[];
+  threshold: number;
+  affected_neurons: ModelAffectedNeuron[];
+  network_summary: PerturbationSummaryMetrics;
+  temporal_summary?: TemporalNeuronMetrics[] | null;
+}
+
+export interface NetworkAnalysisProvenance {
+  simulation_id: string;
+  connectome_provider: string;
+  dataset_name?: string | null;
+  dataset_version?: string | null;
+  is_synthetic: boolean;
+  analysis_timestamp: string;
+  analysis_version: string;
+  threshold: number;
+  max_hops: number;
+  neuron_count: number;
+  connection_count: number;
+}
+
+export interface NetworkAnalysisResult {
+  simulation_id: string;
+  network_metrics: GraphStructuralMetrics;
+  centrality: CentralityMetricValue[];
+  target_analysis: TargetAnalysis[];
+  perturbation_analysis: PerturbationAnalysis;
+  provenance: NetworkAnalysisProvenance;
+}
+
+export interface NetworkAnalysisRequest {
+  simulation_id: string;
+  threshold?: number;
+  max_hops?: number;
+  metrics?: string[];
+}
+
+/**
+ * Execute network analysis on a completed simulation.
+ */
+export async function runNetworkAnalysis(
+  request: NetworkAnalysisRequest
+): Promise<NetworkAnalysisResult> {
+  const response = await fetch(`${API_BASE_URL}/analysis/network`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.detail || `Network analysis failed: ${response.status}`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+
