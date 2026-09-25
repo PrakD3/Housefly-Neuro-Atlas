@@ -38,3 +38,9 @@ class ConnectomeProvider(ABC):
     def extract_subgraph(self, neuron_ids: List[str]) -> SubgraphResponse:
         """Extract a subgraph containing the specified neurons and any edges between them."""
         pass
+
+    @abstractmethod
+    def search_neurons(self, query: str, limit: int = 20) -> List[Neuron]:
+        """Search neurons by query text (body ID, cell type, instance, or region)."""
+        pass
+

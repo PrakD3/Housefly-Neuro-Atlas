@@ -4,55 +4,73 @@ import {
   getConnectomeInfo, 
   getNeurons, 
   getNeuronNeighbors,
+  getNeighborhood,
   Neuron, 
   Connection, 
   ConnectomeMetadata, 
   SubgraphResponse 
 } from '../../api/client';
 import { Scene } from './Scene';
+import { RealModePanel } from './RealModePanel';
+import { ErrorPanel } from './ErrorPanel';
+import { computeTransform, DEFAULT_SCENE_DIAMETER } from './VisualizationTransform';
 
 export const ConnectomeViewer: React.FC = () => {
   const [metadata, setMetadata] = useState<ConnectomeMetadata | null>(null);
   const [neurons, setNeurons] = useState<Neuron[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [queryLoading, setQueryLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | undefined>(undefined);
 
   const [selectedNeuron, setSelectedNeuron] = useState<Neuron | null>(null);
   const [hoveredNeuron, setHoveredNeuron] = useState<Neuron | null>(null);
   const [neighborsData, setNeighborsData] = useState<SubgraphResponse | null>(null);
   const [showConnections, setShowConnections] = useState<boolean>(true);
+  const [wasTruncated, setWasTruncated] = useState<boolean>(false);
+  const [activeFocalId, setActiveFocalId] = useState<string | null>(null);
 
-  // Filters
+  // Filters (used in synthetic mode)
   const [searchQuery, setSearchQuery] = useState("");
   const [cellTypeFilter, setCellTypeFilter] = useState("All");
   const [regionFilter, setRegionFilter] = useState("All");
 
   const [canvasKey, setCanvasKey] = useState<number>(0);
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const info = await getConnectomeInfo();
-        setMetadata(info);
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setErrorStatus(undefined);
+      const info = await getConnectomeInfo();
+      setMetadata(info);
 
+      if (info.is_synthetic) {
+        // Synthetic mode: load all neurons to allow full graph exploration
         const allNeurons = await getNeurons();
         setNeurons(allNeurons);
-        
-        // For Phase 2, we load connections when a neuron is selected.
-        setLoading(false);
-      } catch (err: any) {
-        setError(err.message);
-        setLoading(false);
+      } else {
+        // Real mode: start empty to avoid loading 140,000+ neurons into browser memory
+        setNeurons([]);
+        setConnections([]);
       }
-    };
-    loadData();
+      setLoading(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load connectome info');
+      setErrorStatus(err.status || 500);
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    const fetchNeighbors = async () => {
-      if (selectedNeuron) {
+    loadData();
+  }, [loadData]);
+
+  // When a neuron is selected in synthetic mode, fetch its 1-hop neighbors
+  useEffect(() => {
+    if (metadata?.is_synthetic && selectedNeuron) {
+      const fetchNeighbors = async () => {
         try {
           const data = await getNeuronNeighbors(selectedNeuron.neuron_id, 1);
           setNeighborsData(data);
@@ -60,13 +78,49 @@ export const ConnectomeViewer: React.FC = () => {
         } catch (err) {
           console.error("Failed to fetch neighbors", err);
         }
-      } else {
-        setNeighborsData(null);
-        setConnections([]);
-      }
-    };
-    fetchNeighbors();
-  }, [selectedNeuron]);
+      };
+      fetchNeighbors();
+    } else if (metadata?.is_synthetic && !selectedNeuron) {
+      setNeighborsData(null);
+      setConnections([]);
+    }
+  }, [selectedNeuron, metadata?.is_synthetic]);
+
+  // Load a neighborhood in real mode
+  const handleLoadNeighborhood = useCallback(async (neuronId: string, hops: number = 1) => {
+    try {
+      setQueryLoading(true);
+      setError(null);
+      setErrorStatus(undefined);
+
+      const data = await getNeighborhood(neuronId, hops);
+      setNeurons(data.neurons);
+      setConnections(data.connections);
+      setNeighborsData(data);
+      setWasTruncated(data.was_truncated);
+      setActiveFocalId(neuronId);
+
+      const central = data.neurons.find(n => n.neuron_id === neuronId) || data.neurons[0] || null;
+      setSelectedNeuron(central);
+      setCanvasKey(prev => prev + 1);
+    } catch (err: any) {
+      setError(err.message || `Failed to fetch neighborhood for neuron ${neuronId}`);
+      setErrorStatus(err.status);
+    } finally {
+      setQueryLoading(false);
+    }
+  }, []);
+
+  const handleClearRealMode = useCallback(() => {
+    setNeurons([]);
+    setConnections([]);
+    setNeighborsData(null);
+    setSelectedNeuron(null);
+    setActiveFocalId(null);
+    setWasTruncated(false);
+    setError(null);
+    setCanvasKey(prev => prev + 1);
+  }, []);
 
   const handleSelectNeuron = useCallback((neuron: Neuron | null) => {
     setSelectedNeuron(prev => (prev?.neuron_id === neuron?.neuron_id ? null : neuron));
@@ -89,25 +143,53 @@ export const ConnectomeViewer: React.FC = () => {
   }, []);
 
   const displayNeuron = hoveredNeuron || selectedNeuron;
-  
-  // Calculate unique cell types and regions
-  const cellTypes = useMemo(() => ["All", ...Array.from(new Set(neurons.map(n => n.cell_type))).sort()], [neurons]);
-  const regions = useMemo(() => ["All", ...Array.from(new Set(neurons.map(n => n.region))).sort()], [neurons]);
+  const isRealMode = metadata?.is_synthetic === false;
 
-  // Apply filters
+  // Calculate unique cell types and regions
+  const cellTypes = useMemo(
+    () => ["All", ...Array.from(new Set(neurons.map(n => n.cell_type))).sort()],
+    [neurons]
+  );
+  const regions = useMemo(
+    () => ["All", ...Array.from(new Set(neurons.map(n => n.region))).sort()],
+    [neurons]
+  );
+
+  // Apply filters (only in synthetic mode)
   const filteredNeurons = useMemo(() => {
+    if (isRealMode) {
+      return neurons;
+    }
     return neurons.filter(n => {
       if (searchQuery && !n.neuron_id.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       if (cellTypeFilter !== "All" && n.cell_type !== cellTypeFilter) return false;
       if (regionFilter !== "All" && n.region !== regionFilter) return false;
       return true;
     });
-  }, [neurons, searchQuery, cellTypeFilter, regionFilter]);
+  }, [neurons, searchQuery, cellTypeFilter, regionFilter, isRealMode]);
 
-  // Compute bounding box for camera framing.
-  // IMPORTANT: skip neurons that have no spatial coordinates.
-  // has_coordinates=false means x/y/z are null — never use them for layout.
+  // Normalization transform for real mode voxel coordinates
+  const transform = useMemo(() => {
+    if (!isRealMode || filteredNeurons.length === 0) {
+      return null;
+    }
+    return computeTransform(filteredNeurons, DEFAULT_SCENE_DIAMETER);
+  }, [isRealMode, filteredNeurons]);
+
+  // Compute bounding box for camera framing
   const boundingBox = useMemo(() => {
+    if (transform) {
+      // In normalized real mode, scene coordinates are centered at [0, 0, 0]
+      const size = transform.sceneSize;
+      return {
+        center: [0, 0, 0] as [number, number, number],
+        width: size,
+        height: size,
+        depth: size,
+        maxDimension: size,
+      };
+    }
+
     const spatialNeurons = filteredNeurons.filter(n => n.has_coordinates);
     if (spatialNeurons.length === 0) {
       return { center: [0, 0, 0] as [number, number, number], width: 40, height: 40, depth: 40, maxDimension: 40 };
@@ -117,7 +199,6 @@ export const ConnectomeViewer: React.FC = () => {
     let minZ = Infinity, maxZ = -Infinity;
 
     for (const n of spatialNeurons) {
-      // Type narrowing: has_coordinates=true guarantees these are non-null
       const x = n.x!;
       const y = n.y!;
       const z = n.z!;
@@ -132,19 +213,15 @@ export const ConnectomeViewer: React.FC = () => {
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const cz = (minZ + maxZ) / 2;
-    const width  = maxX - minX || 40;
+    const width = maxX - minX || 40;
     const height = Math.max(maxY - minY, 1) || 40;
-    const depth  = maxZ - minZ || 40;
+    const depth = maxZ - minZ || 40;
     const maxDimension = Math.max(width, height, depth) || 40;
 
     return { center: [cx, cy, cz] as [number, number, number], width, height, depth, maxDimension };
-  }, [filteredNeurons]);
-
+  }, [filteredNeurons, transform]);
 
   if (loading) return <div className="loading-screen">Loading Connectome Data...</div>;
-  if (error) return <div className="error-screen">Error loading data: {error}</div>;
-
-
 
   // Color mapping for the legend
   const cellTypeColors: Record<string, string> = {
@@ -153,6 +230,10 @@ export const ConnectomeViewer: React.FC = () => {
     "Projection": "#f87171",  // red
     "Motor": "#34d399",       // green
     "Modulatory": "#38bdf8",  // cyan
+    "descending": "#f97316",  // orange
+    "ascending": "#a3e635",   // lime
+    "visual": "#22d3ee",      // cyan
+    "central": "#c084fc",     // lavender
   };
 
   return (
@@ -215,39 +296,59 @@ export const ConnectomeViewer: React.FC = () => {
                 {metadata?.is_synthetic ? 'Software Test Data' : 'Real Connectome Data'}
               </span>
             </div>
+            {metadata?.organism && (
+              <div className="data-row">
+                <span className="data-label">Organism</span>
+                <span className="data-value">{metadata.organism} {metadata.sex ? `(${metadata.sex})` : ''}</span>
+              </div>
+            )}
           </div>
 
-          <div className="panel-section">
-            <h2 className="panel-title">Controls</h2>
-            
-            <div className="control-group">
-              <label>Search Neuron</label>
-              <input 
-                type="text" 
-                placeholder="Neuron ID..." 
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-              />
+          {/* Real Mode query panel vs Synthetic Mode filter controls */}
+          {isRealMode ? (
+            <RealModePanel
+              onLoadNeighborhood={handleLoadNeighborhood}
+              onClear={handleClearRealMode}
+              isLoading={queryLoading}
+              activeNeuronId={activeFocalId}
+            />
+          ) : (
+            <div className="panel-section">
+              <h2 className="panel-title">Controls</h2>
+              
+              <div className="control-group">
+                <label>Search Neuron</label>
+                <input 
+                  type="text" 
+                  placeholder="Neuron ID..." 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+              
+              <div className="control-group">
+                <label>Cell Type</label>
+                <select value={cellTypeFilter} onChange={e => setCellTypeFilter(e.target.value)}>
+                  {cellTypes.map(ct => <option key={ct} value={ct}>{ct}</option>)}
+                </select>
+              </div>
+              
+              <div className="control-group">
+                <label>Region</label>
+                <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}>
+                  {regions.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
             </div>
-            
-            <div className="control-group">
-              <label>Cell Type</label>
-              <select value={cellTypeFilter} onChange={e => setCellTypeFilter(e.target.value)}>
-                {cellTypes.map(ct => <option key={ct} value={ct}>{ct}</option>)}
-              </select>
-            </div>
-            
-            <div className="control-group">
-              <label>Region</label>
-              <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}>
-                {regions.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
+          )}
 
-            <button className="btn btn-primary" style={{marginTop: '0.5rem'}} onClick={toggleConnections}>
+          {/* Common display controls */}
+          <div className="panel-section">
+            <h2 className="panel-title">View Options</h2>
+            <button className="btn btn-primary" style={{marginTop: '0.25rem', width: '100%'}} onClick={toggleConnections}>
               {showConnections ? "Hide Connections" : "Show Connections"}
             </button>
-            <button className="btn" onClick={resetCamera}>
+            <button className="btn" style={{marginTop: '0.5rem', width: '100%'}} onClick={resetCamera}>
               Reset View
             </button>
           </div>
@@ -266,7 +367,54 @@ export const ConnectomeViewer: React.FC = () => {
         </aside>
 
         {/* CENTER VIEWPORT */}
-        <section className="viewport">
+        <section className="viewport" style={{ position: 'relative' }}>
+          {error && (
+            <ErrorPanel
+              error={error}
+              statusCode={errorStatus}
+              onDismiss={() => setError(null)}
+              onRetry={isRealMode && activeFocalId ? () => handleLoadNeighborhood(activeFocalId) : loadData}
+            />
+          )}
+
+          {wasTruncated && (
+            <div style={{
+              position: 'absolute',
+              top: '1rem',
+              right: '1rem',
+              zIndex: 10,
+              backgroundColor: 'rgba(245, 158, 11, 0.9)',
+              color: '#0f172a',
+              padding: '0.4rem 0.8rem',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+            }}>
+              Subgraph truncated to server limits (max 500 neurons)
+            </div>
+          )}
+
+          {isRealMode && neurons.length === 0 && !queryLoading && !error && (
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              textAlign: 'center',
+              color: '#94a3b8',
+              zIndex: 5,
+              pointerEvents: 'none',
+              maxWidth: '380px',
+            }}>
+              <div style={{ fontSize: '2rem', marginBottom: '0.5rem', opacity: 0.5 }}>⚡</div>
+              <h3 style={{ color: '#e2e8f0', fontSize: '1rem', marginBottom: '0.5rem' }}>No Subgraph Loaded</h3>
+              <p style={{ fontSize: '0.85rem', lineHeight: 1.5 }}>
+                Enter a neuron body ID in the left panel to load and explore its subnetwork in 3D.
+              </p>
+            </div>
+          )}
+
           <Canvas key={canvasKey}>
             <Scene
               neurons={filteredNeurons}
@@ -280,6 +428,7 @@ export const ConnectomeViewer: React.FC = () => {
               width={boundingBox.width}
               height={boundingBox.height}
               depth={boundingBox.depth}
+              transform={transform}
             />
           </Canvas>
           
@@ -331,6 +480,12 @@ export const ConnectomeViewer: React.FC = () => {
                     <span className="data-value">{selectedNeuron.instance}</span>
                   </div>
                 )}
+                {selectedNeuron.status && (
+                  <div className="data-row">
+                    <span className="data-label">Status</span>
+                    <span className="data-value">{selectedNeuron.status}</span>
+                  </div>
+                )}
                 {selectedNeuron.neurotransmitter && (
                   <div className="data-row">
                     <span className="data-label">Neurotransmitter</span>
@@ -347,6 +502,16 @@ export const ConnectomeViewer: React.FC = () => {
                   <span className="data-label">Degree</span>
                   <span className="data-value">{neighborsData ? neighborsData.connections.length : '-'}</span>
                 </div>
+
+                {isRealMode && selectedNeuron.neuron_id !== activeFocalId && (
+                  <button
+                    className="btn btn-primary"
+                    style={{ marginTop: '0.75rem', width: '100%', fontSize: '0.8rem' }}
+                    onClick={() => handleLoadNeighborhood(selectedNeuron.neuron_id, 1)}
+                  >
+                    Focus Subgraph on this Neuron
+                  </button>
+                )}
               </div>
 
               {neighborsData && neighborsData.neurons.length > 1 && (
@@ -383,7 +548,7 @@ export const ConnectomeViewer: React.FC = () => {
         </div>
         <div className="bottom-stat">
           <span>CONNECTIONS:</span>
-          <span className="bottom-stat-val">{metadata?.connection_count !== undefined && metadata.connection_count >= 0 ? metadata.connection_count : 0}</span>
+          <span className="bottom-stat-val">{metadata?.connection_count !== undefined && metadata.connection_count >= 0 ? metadata.connection_count : (isRealMode ? connections.length : 0)}</span>
         </div>
         <div className="bottom-stat">
           <span>SELECTED:</span>

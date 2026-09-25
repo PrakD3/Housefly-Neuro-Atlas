@@ -160,6 +160,22 @@ class SyntheticConnectomeProvider(ConnectomeProvider):
         induced_subgraph = self.graph.subgraph(valid_nodes)
         return self._extract_from_nx_graph(induced_subgraph)
         
+    def search_neurons(self, query: str, limit: int = 20) -> List[Neuron]:
+        q = query.strip().lower()
+        if not q:
+            return []
+        results = []
+        for n in self.neurons_metadata.values():
+            if (
+                q in n.neuron_id.lower()
+                or q in n.cell_type.lower()
+                or q in n.region.lower()
+            ):
+                results.append(n)
+                if len(results) >= limit:
+                    break
+        return results
+
     def _extract_from_nx_graph(self, nx_graph: nx.DiGraph) -> SubgraphResponse:
         neurons = [self.neurons_metadata[nid] for nid in nx_graph.nodes()]
         
@@ -172,3 +188,4 @@ class SyntheticConnectomeProvider(ConnectomeProvider):
             ))
             
         return SubgraphResponse(neurons=neurons, connections=connections)
+

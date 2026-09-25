@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Neuron, Connection, SubgraphResponse } from '../../api/client';
 import { NeuronNode } from './NeuronNode';
 import { ConnectionLine } from './ConnectionLine';
+import { VisualizationTransform, toScenePosition } from './VisualizationTransform';
 
 interface SceneProps {
   neurons: Neuron[];
@@ -18,6 +19,7 @@ interface SceneProps {
   width: number;
   height: number;
   depth: number;
+  transform?: VisualizationTransform | null;
 }
 
 export const Scene: React.FC<SceneProps> = ({ 
@@ -31,7 +33,8 @@ export const Scene: React.FC<SceneProps> = ({
   center,
   width,
   height,
-  depth
+  depth,
+  transform,
 }) => {
   const controlsRef = useRef<any>(null);
 
@@ -47,6 +50,15 @@ export const Scene: React.FC<SceneProps> = ({
     if (!neighborsData) return new Set<string>();
     return new Set(neighborsData.neurons.map(n => n.neuron_id));
   }, [neighborsData]);
+
+  // Map neuron ID to normalized scene coordinates
+  const scenePositions = useMemo(() => {
+    const map = new Map<string, [number, number, number] | null>();
+    neurons.forEach(n => {
+      map.set(n.neuron_id, toScenePosition(n, transform));
+    });
+    return map;
+  }, [neurons, transform]);
 
   // Initial and reframing camera setup
   useEffect(() => {
@@ -87,23 +99,15 @@ export const Scene: React.FC<SceneProps> = ({
   }, [center, width, height, depth, selectedNeuron]);
 
   // Smooth camera targeting on selection.
-  // Only move toward the neuron if it actually has spatial coordinates.
+  // Only move toward the neuron if it actually has spatial coordinates in scene.
   useFrame(() => {
-    if (
-      selectedNeuron &&
-      selectedNeuron.has_coordinates &&
-      selectedNeuron.x !== null &&
-      selectedNeuron.y !== null &&
-      selectedNeuron.z !== null &&
-      controlsRef.current
-    ) {
-      const targetPos = new THREE.Vector3(
-        selectedNeuron.x,
-        selectedNeuron.y,
-        selectedNeuron.z
-      );
-      controlsRef.current.target.lerp(targetPos, 0.05);
-      controlsRef.current.update();
+    if (selectedNeuron && controlsRef.current) {
+      const pos = scenePositions.get(selectedNeuron.neuron_id);
+      if (pos) {
+        const targetPos = new THREE.Vector3(...pos);
+        controlsRef.current.target.lerp(targetPos, 0.05);
+        controlsRef.current.update();
+      }
     }
   });
 
@@ -125,6 +129,7 @@ export const Scene: React.FC<SceneProps> = ({
             neuron={neuron}
             isSelected={isSelected}
             isDimmed={isDimmed}
+            scenePosition={scenePositions.get(neuron.neuron_id)}
             onSelect={onSelectNeuron}
             onHover={onHoverNeuron}
           />
@@ -150,6 +155,8 @@ export const Scene: React.FC<SceneProps> = ({
             target={target}
             isHighlighted={isHighlighted}
             isDimmed={isDimmed}
+            sceneSourcePos={scenePositions.get(conn.source_neuron)}
+            sceneTargetPos={scenePositions.get(conn.target_neuron)}
           />
         );
       })}

@@ -5,6 +5,7 @@ interface NeuronNodeProps {
   neuron: Neuron;
   isSelected: boolean;
   isDimmed?: boolean;
+  scenePosition?: [number, number, number] | null;
   onSelect: (neuron: Neuron) => void;
   onHover: (neuron: Neuron | null) => void;
 }
@@ -28,6 +29,7 @@ export const NeuronNode: React.FC<NeuronNodeProps> = ({
   neuron,
   isSelected,
   isDimmed,
+  scenePosition,
   onSelect,
   onHover,
 }) => {
@@ -35,21 +37,27 @@ export const NeuronNode: React.FC<NeuronNodeProps> = ({
 
   /**
    * Gate: neurons without coordinates must NEVER be rendered in 3D space.
-   * has_coordinates=false means x/y/z are null — there is no valid position.
-   * These neurons appear in the inspector panel but not in the scene.
+   * If scenePosition is explicitly null, or if coordinates are absent, do not render.
    */
-  if (!neuron.has_coordinates || neuron.x === null || neuron.y === null || neuron.z === null) {
+  if (scenePosition === null) {
     return null;
   }
 
+  if (scenePosition === undefined && (!neuron.has_coordinates || neuron.x === null || neuron.y === null || neuron.z === null)) {
+    return null;
+  }
+
+  const position: [number, number, number] = scenePosition !== undefined
+    ? scenePosition
+    : [neuron.x as number, neuron.y as number, neuron.z as number];
+
   const color = cellTypeColors[neuron.cell_type] ?? "#e2e8f0";
 
-  // Subtle size variation using coordinate hash — safe because we've verified coords are non-null
-  const coordSum = Math.abs(neuron.x + neuron.y + neuron.z);
+  // Subtle size variation using coordinate hash
+  const coordSum = Math.abs(position[0] + position[1] + position[2]);
   const sizeVariation = 0.8 + ((coordSum % 100) / 100) * 0.4;
   const scale = isSelected ? 2.5 : hovered ? 2.0 : sizeVariation;
 
-  const position: [number, number, number] = [neuron.x, neuron.y, neuron.z];
 
   return (
     <mesh

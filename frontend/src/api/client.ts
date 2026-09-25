@@ -56,6 +56,24 @@ export interface SubgraphResponse {
   connections: Connection[];
 }
 
+export interface SubgraphProvenance {
+  dataset_name?: string | null;
+  dataset_version?: string | null;
+  is_synthetic: boolean;
+  query_timestamp?: string | null;
+}
+
+export interface BoundedSubgraphResponse extends SubgraphResponse {
+  neuron_count: number;
+  connection_count: number;
+  was_truncated: boolean;
+  max_neurons_limit: number;
+  max_connections_limit: number;
+  query_neuron_id: string;
+  hops: number;
+  provenance?: SubgraphProvenance | null;
+}
+
 /**
  * Check backend health status.
  */
@@ -126,3 +144,57 @@ export async function getNeuronNeighbors(
   }
   return response.json();
 }
+
+/**
+ * Get bounded neighborhood subgraph for a neuron with server-enforced limits.
+ */
+export async function getNeighborhood(
+  neuronId: string,
+  hops: number = 1,
+  maxNeurons?: number,
+  maxConnections?: number
+): Promise<BoundedSubgraphResponse> {
+  const params = new URLSearchParams({
+    neuron_id: neuronId,
+    hops: hops.toString(),
+  });
+  if (maxNeurons) params.append("max_neurons", maxNeurons.toString());
+  if (maxConnections) params.append("max_connections", maxConnections.toString());
+
+  const response = await fetch(
+    `${API_BASE_URL}/connectome/neighborhood?${params.toString()}`
+  );
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.detail || `Failed to fetch neighborhood: ${response.status}`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+
+/**
+ * Search neurons by ID, cell type, instance, or region.
+ */
+export async function searchNeurons(
+  query: string,
+  limit: number = 20
+): Promise<Neuron[]> {
+  const params = new URLSearchParams({
+    query,
+    limit: limit.toString(),
+  });
+  const response = await fetch(
+    `${API_BASE_URL}/connectome/search?${params.toString()}`
+  );
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = errorBody.detail || `Failed to search neurons: ${response.status}`;
+    const err = new Error(message) as Error & { status?: number };
+    err.status = response.status;
+    throw err;
+  }
+  return response.json();
+}
+

@@ -15,12 +15,20 @@ Error handling:
 The synthetic provider does not raise any of the neuPrint exceptions, so
 existing synthetic-mode behavior is fully preserved.
 """
+from datetime import datetime, timezone
 import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..models.connectome import Connection, ConnectomeMetadata, Neuron, SubgraphResponse
+from ..models.connectome import (
+    BoundedSubgraphResponse,
+    Connection,
+    ConnectomeMetadata,
+    Neuron,
+    SubgraphProvenance,
+    SubgraphResponse,
+)
 from ..connectome.factory import get_provider
 from ..connectome.real.client import (
     NeuPrintAuthenticationError,
@@ -164,3 +172,99 @@ def extract_subgraph(neuron_ids: List[str]):
     except NeuPrintError as exc:
         logger.error("neuPrint error in /connectome/subgraph: %s", exc)
         raise _provider_unavailable(exc)
+
+
+# Hard safety limits for bounded visualization subgraphs
+MAX_SUBGRAPH_NEURONS = 500
+MAX_SUBGRAPH_CONNECTIONS = 2000
+
+
+@router.get("/neighborhood", response_model=BoundedSubgraphResponse)
+def get_neighborhood(
+    neuron_id: str,
+    hops: int = Query(1, ge=1, le=2),
+    max_neurons: int = Query(MAX_SUBGRAPH_NEURONS, ge=1, le=MAX_SUBGRAPH_NEURONS),
+    max_connections: int = Query(MAX_SUBGRAPH_CONNECTIONS, ge=1, le=MAX_SUBGRAPH_CONNECTIONS),
+):
+    """
+    Retrieve a bounded neighborhood subgraph for a given neuron up to `hops` distance.
+    Enforces server-side hard limits to protect frontend rendering performance.
+    """
+    try:
+        provider = get_provider()
+        central = provider.get_neuron(neuron_id)
+        if not central:
+            raise HTTPException(status_code=404, detail=f"Neuron '{neuron_id}' not found")
+
+        raw_subgraph = provider.get_neighbors(neuron_id, hops=hops)
+
+        # Retain central neuron + neighbors up to max_neurons
+        neurons: List[Neuron] = []
+        seen_ids = set()
+
+        neurons.append(central)
+        seen_ids.add(central.neuron_id)
+
+        for n in raw_subgraph.neurons:
+            if n.neuron_id not in seen_ids:
+                if len(neurons) >= max_neurons:
+                    break
+                neurons.append(n)
+                seen_ids.add(n.neuron_id)
+
+        # Retain connections between the kept neurons up to max_connections
+        valid_connections = [
+            c for c in raw_subgraph.connections
+            if c.source_neuron in seen_ids and c.target_neuron in seen_ids
+        ]
+        connections = valid_connections[:max_connections]
+
+        raw_neuron_ids = {n.neuron_id for n in raw_subgraph.neurons} | {central.neuron_id}
+        was_truncated = (
+            len(raw_neuron_ids) > max_neurons
+            or len(raw_subgraph.connections) > max_connections
+            or len(valid_connections) > max_connections
+        )
+
+        meta = provider.get_metadata()
+        provenance = SubgraphProvenance(
+            dataset_name=meta.dataset_name,
+            dataset_version=meta.dataset_version,
+            is_synthetic=meta.is_synthetic,
+            query_timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+        return BoundedSubgraphResponse(
+            neurons=neurons,
+            connections=connections,
+            neuron_count=len(neurons),
+            connection_count=len(connections),
+            was_truncated=was_truncated,
+            max_neurons_limit=max_neurons,
+            max_connections_limit=max_connections,
+            query_neuron_id=neuron_id,
+            hops=hops,
+            provenance=provenance,
+        )
+    except HTTPException:
+        raise
+    except NeuPrintError as exc:
+        logger.error("neuPrint error in /connectome/neighborhood: %s", exc)
+        raise _provider_unavailable(exc)
+
+
+@router.get("/search", response_model=List[Neuron])
+def search_neurons(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """
+    Search neurons by query text (body ID, cell type, instance, or region).
+    """
+    try:
+        provider = get_provider()
+        return provider.search_neurons(query, limit=limit)
+    except NeuPrintError as exc:
+        logger.error("neuPrint error in /connectome/search: %s", exc)
+        raise _provider_unavailable(exc)
+

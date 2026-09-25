@@ -66,3 +66,27 @@ class SubgraphResponse(BaseModel):
     """A subgraph containing a set of neurons and the connections between them."""
     neurons: List[Neuron]
     connections: List[Connection]
+
+
+class SubgraphProvenance(BaseModel):
+    """Provenance metadata for an extracted subgraph."""
+    dataset_name: Optional[str] = None
+    dataset_version: Optional[str] = None
+    is_synthetic: bool = True
+    query_timestamp: Optional[str] = None
+
+
+class BoundedSubgraphResponse(SubgraphResponse):
+    """
+    Bounded subgraph response with server-enforced limits and provenance.
+    Guarantees browser-safe payload size for visualization.
+    """
+    neuron_count: int
+    connection_count: int
+    was_truncated: bool
+    max_neurons_limit: int
+    max_connections_limit: int
+    query_neuron_id: str
+    hops: int
+    provenance: Optional[SubgraphProvenance] = None
+

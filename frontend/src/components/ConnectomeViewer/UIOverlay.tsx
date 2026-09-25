@@ -98,7 +98,9 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
             <p style={{ margin: '0.25rem 0' }}><strong>Type:</strong> {displayNeuron.cell_type}</p>
             <p style={{ margin: '0.25rem 0' }}><strong>Region:</strong> {displayNeuron.region}</p>
             <p style={{ margin: '0.25rem 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-              pos: ({displayNeuron.x.toFixed(1)}, {displayNeuron.y.toFixed(1)}, {displayNeuron.z.toFixed(1)})
+              {displayNeuron.has_coordinates
+                ? `pos: (${displayNeuron.x!.toFixed(1)}, ${displayNeuron.y!.toFixed(1)}, ${displayNeuron.z!.toFixed(1)})`
+                : 'pos: no spatial data'}
             </p>
           </div>
         )}

@@ -307,7 +307,35 @@ class RealDrosophilaConnectomeProvider(ConnectomeProvider):
 
         return SubgraphResponse(neurons=neurons, connections=connections)
 
+    def search_neurons(self, query: str, limit: int = 20) -> List[Neuron]:
+        """
+        Search neurons by body ID, cell type, or instance name.
+        """
+        q = query.strip()
+        if not q:
+            return []
+
+        # If purely numeric, treat as body ID search first
+        if q.isdigit():
+            neuron = self.get_neuron(q)
+            if neuron:
+                return [neuron]
+
+        escaped = self._escape(q)
+        cypher = f"""
+            MATCH (n:Neuron)
+            WHERE n.type STARTS WITH '{escaped}'
+               OR n.instance STARTS WITH '{escaped}'
+               OR n.type CONTAINS '{escaped}'
+            RETURN {_NEURON_RETURN}
+            LIMIT {min(limit, 50)}
+        """
+        raw = self._client.query_cypher(cypher)
+        records = self._parse_neuron_records(raw)
+        return [self._normalize_neuron(r) for r in records]
+
     # ------------------------------------------------------------------
+
     # Normalization — neuPrint DTOs → internal models
     # ------------------------------------------------------------------
 

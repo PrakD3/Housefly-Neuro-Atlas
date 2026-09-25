@@ -9,6 +9,8 @@ interface ConnectionLineProps {
   target: Neuron;
   isHighlighted: boolean;
   isDimmed?: boolean;
+  sceneSourcePos?: [number, number, number] | null;
+  sceneTargetPos?: [number, number, number] | null;
 }
 
 export const ConnectionLine: React.FC<ConnectionLineProps> = ({
@@ -17,28 +19,39 @@ export const ConnectionLine: React.FC<ConnectionLineProps> = ({
   isHighlighted,
   isDimmed,
   connection,
+  sceneSourcePos,
+  sceneTargetPos,
 }) => {
   /**
    * Gate: both endpoints must have coordinates to draw a line.
-   * If either neuron has has_coordinates=false, the line cannot be drawn.
+   * If either neuron has has_coordinates=false (or null position), the line cannot be drawn.
    * Never substitute (0,0,0) for missing coordinates.
    */
-  if (
-    !source.has_coordinates || source.x === null || source.y === null || source.z === null ||
-    !target.has_coordinates || target.x === null || target.y === null || target.z === null
-  ) {
+  if (sceneSourcePos === null || sceneTargetPos === null) {
     return null;
   }
 
-  // Safe to use coordinates — both neurons are confirmed to have them.
+  if (sceneSourcePos === undefined && (!source.has_coordinates || source.x === null || source.y === null || source.z === null)) {
+    return null;
+  }
+
+  if (sceneTargetPos === undefined && (!target.has_coordinates || target.x === null || target.y === null || target.z === null)) {
+    return null;
+  }
+
   const start = useMemo(
-    () => new THREE.Vector3(source.x!, source.y!, source.z!),
-    [source]
+    () => sceneSourcePos
+      ? new THREE.Vector3(...sceneSourcePos)
+      : new THREE.Vector3(source.x!, source.y!, source.z!),
+    [source, sceneSourcePos]
   );
   const end = useMemo(
-    () => new THREE.Vector3(target.x!, target.y!, target.z!),
-    [target]
+    () => sceneTargetPos
+      ? new THREE.Vector3(...sceneTargetPos)
+      : new THREE.Vector3(target.x!, target.y!, target.z!),
+    [target, sceneTargetPos]
   );
+
 
   const mid = useMemo(() => {
     const midPoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
